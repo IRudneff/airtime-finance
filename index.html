@@ -171,16 +171,32 @@ function EntryForm({onSave}) {
   const [cmt,setCmt] = useState("");
   const [done,setDone] = useState(false);
 
+  const isNal = acc === "Нал";
+  // Если счёт Нал — шагов 4 (без выбора нал/безнал), иначе 5
+  const STEPS = isNal ? 4 : 5;
   const cats = type==="income"?INCOME_CATS:EXPENSE_CATS;
-  const ok = [!!type,!!acc,!!pay,!!cat,!!amt&&!isNaN(+amt)&&+amt>0];
+
+  // ok[i] — можно ли идти дальше на шаге i
+  // Шаги: 0=тип, 1=счёт, 2=нал/безнал (только если не Нал), 3=категория, 4=сумма
+  // При счёте Нал шаги: 0=тип, 1=счёт, 2=категория, 3=сумма
+  const effectivePay = isNal ? "cash" : pay;
+  const ok = isNal
+    ? [!!type, !!acc, !!cat, !!amt&&!isNaN(+amt)&&+amt>0]
+    : [!!type, !!acc, !!pay, !!cat, !!amt&&!isNaN(+amt)&&+amt>0];
 
   function reset(){setStep(0);setType(null);setAcc(null);setPay(null);setCat(null);setAmt("");setCmt("");}
 
   function submit(){
-    if(!ok[4])return;
-    onSave({id:Date.now(),date:new Date().toISOString(),type,account:acc,payType:pay,category:cat,amount:+amt,comment:cmt});
+    if(!ok[STEPS-1])return;
+    onSave({id:Date.now(),date:new Date().toISOString(),type,account:acc,payType:effectivePay,category:cat,amount:+amt,comment:cmt});
     setDone(true);
     setTimeout(()=>{setDone(false);reset();},1500);
+  }
+
+  // При смене счёта сбрасываем pay и возвращаемся если надо
+  function chooseAcc(a) {
+    setAcc(a);
+    setPay(null);
   }
 
   if(done) return (
@@ -190,38 +206,45 @@ function EntryForm({onSave}) {
     </div>
   );
 
+  // Определяем какой контент показывать на каждом шаге
+  // При счёте Нал: 0=тип, 1=счёт, 2=категория, 3=сумма
+  // Иначе:         0=тип, 1=счёт, 2=нал/безнал, 3=категория, 4=сумма
+  const showPayStep = !isNal && step === 2;
+  const showCatStep = isNal ? step === 2 : step === 3;
+  const showAmtStep = isNal ? step === 3 : step === 4;
+
   return (
     <div>
-      <Dots total={5} cur={step}/>
+      <Dots total={STEPS} cur={step}/>
       {step===0&&<><Lbl>Тип операции</Lbl><div style={{display:"flex",gap:12}}>
         <ChoiceBtn label="Доход" icon="📈" active={type==="income"} color={C.green} onClick={()=>setType("income")}/>
         <ChoiceBtn label="Расход" icon="📉" active={type==="expense"} color={C.red} onClick={()=>setType("expense")}/>
       </div></>}
       {step===1&&<><Lbl>Счёт</Lbl><div style={{display:"flex",gap:10}}>
-        {ACCOUNTS.map(a=><ChoiceBtn key={a} label={a} icon={ICONS[a]} active={acc===a} color={C.accent} onClick={()=>setAcc(a)}/>)}
+        {ACCOUNTS.map(a=><ChoiceBtn key={a} label={a} icon={ICONS[a]} active={acc===a} color={C.accent} onClick={()=>chooseAcc(a)}/>)}
       </div></>}
-      {step===2&&<><Lbl>Форма оплаты</Lbl><div style={{display:"flex",gap:12}}>
+      {showPayStep&&<><Lbl>Форма оплаты</Lbl><div style={{display:"flex",gap:12}}>
         <ChoiceBtn label="Нал" icon="💵" active={pay==="cash"} color={C.amber} onClick={()=>setPay("cash")}/>
         <ChoiceBtn label="Безнал" icon="💳" active={pay==="card"} color={C.blue} onClick={()=>setPay("card")}/>
       </div></>}
-      {step===3&&<><Lbl>Категория</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+      {showCatStep&&<><Lbl>Категория</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:8}}>
         {cats.map(c=><PillBtn key={c} label={c} active={cat===c} onClick={()=>setCat(c)}/>)}
       </div></>}
-      {step===4&&<>
+      {showAmtStep&&<>
         <Lbl>Сумма</Lbl>
         <NumInput value={amt} onChange={e=>setAmt(e.target.value)} autoFocus={true}/>
         <div style={{marginTop:14,marginBottom:6}}><Lbl>Комментарий (необязательно)</Lbl></div>
         <TxtInput value={cmt} onChange={e=>setCmt(e.target.value)} placeholder="Клиент, описание..."/>
         <Card style={{marginTop:16,background:C.card2,fontSize:13,color:C.sub,lineHeight:2}}>
           <span style={{color:type==="income"?C.green:C.red,fontWeight:700}}>{type==="income"?"▲ Доход":"▼ Расход"}</span>
-          {"  ·  "}{acc}{"  ·  "}{pay==="cash"?"💵 Нал":"💳 Безнал"}{"  ·  "}{cat}
+          {"  ·  "}{acc}{!isNal&&("  ·  "+(effectivePay==="cash"?"💵 Нал":"💳 Безнал"))}{"  ·  "}{cat}
         </Card>
       </>}
       <div style={{display:"flex",gap:10,marginTop:22}}>
         {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{padding:"13px 18px",borderRadius:12,border:"none",background:C.card2,color:C.sub,cursor:"pointer",fontSize:14,fontWeight:600}}>← Назад</button>}
-        {step<4
+        {step<STEPS-1
           ?<button onClick={()=>ok[step]&&setStep(s=>s+1)} disabled={!ok[step]} style={{flex:1,padding:"13px",borderRadius:12,border:"none",background:ok[step]?C.accent:C.muted,color:C.white,cursor:ok[step]?"pointer":"default",opacity:ok[step]?1:0.45,fontSize:15,fontWeight:700,transition:"all .2s"}}>Далее →</button>
-          :<button onClick={submit} disabled={!ok[4]} style={{flex:1,padding:"13px",borderRadius:12,border:"none",background:ok[4]?C.green:C.muted,color:C.white,cursor:ok[4]?"pointer":"default",opacity:ok[4]?1:0.45,fontSize:15,fontWeight:700}}>💾 Сохранить</button>
+          :<button onClick={submit} disabled={!ok[STEPS-1]} style={{flex:1,padding:"13px",borderRadius:12,border:"none",background:ok[STEPS-1]?C.green:C.muted,color:C.white,cursor:ok[STEPS-1]?"pointer":"default",opacity:ok[STEPS-1]?1:0.45,fontSize:15,fontWeight:700}}>💾 Сохранить</button>
         }
       </div>
     </div>
