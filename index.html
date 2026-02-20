@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"/>
+  <meta name="theme-color" content="#0f0f1e"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Air Time"/>
+  <title>Air Time — Финансы</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700&family=DM+Sans:wght@400;600&display=swap');
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{background:#0f0f1e;min-height:100vh;font-family:'DM Sans',sans-serif;}
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
+    ::-webkit-scrollbar{width:3px;}
+    ::-webkit-scrollbar-track{background:#0f0f1e;}
+    ::-webkit-scrollbar-thumb{background:#3a3a5a;border-radius:2px;}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+// ─────────────────────────────────────────────────────────────────
+// FIREBASE CONFIG — вставьте свои данные для синхронизации
+// Получить: console.firebase.google.com → проект → Web App → Config
+// Если не нужна синхронизация — оставьте как есть (данные будут локально)
+// ─────────────────────────────────────────────────────────────────
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyC51J93AA-IDYvab2jzuJjFPxFTO6OD3IE",
+  projectId: "airtime-finance",
+  appId: "1:897898898287:web:b42c91c339a4ec2fe7be9a",
+};
+
+let db = null;
+let firebaseReady = false;
+
+async function initFirebase() {
+  if (FIREBASE_CONFIG.apiKey === "AIzaSyC51J93AA-IDYvab2jzuJjFPxFTO6OD3IE") return false;
+  try {
+    const { initializeApp } = await import("https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js");
+    const { getFirestore, doc, getDoc, setDoc } = await import("https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore.js");
+    const app = initializeApp(FIREBASE_CONFIG);
+    const fs = getFirestore(app);
+    db = { fs, doc, getDoc, setDoc };
+    firebaseReady = true;
+    return true;
+  } catch(e) { return false; }
+}
+
+async function load(key) {
+  if (db) {
+    try {
+      const snap = await db.getDoc(db.doc(db.fs, "airtime", key));
+      return snap.exists() ? snap.data().value : null;
+    } catch { return null; }
+  }
+  return localStorage.getItem("at_" + key);
+}
+
+async function save(key, value) {
+  if (db) {
+    try { await db.setDoc(db.doc(db.fs, "airtime", key), { value }); } catch {}
+  } else {
+    localStorage.setItem("at_" + key, value);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+const { useState, useEffect } = React;
+
+const ACCOUNTS = ["Продакшн", "Киберспорт", "Нал"];
+const INCOME_CATS = ["Съёмка", "Монтаж/постпрод", "Трансляция", "Вебинар", "Выездная съёмка", "AI-видео", "Прочий доход"];
+const EXPENSE_CATS = ["Коммуналка", "Зарплата", "Аренда/хоз", "Реклама", "Оборудование", "Подписки/ПО", "Налоги/бухгалтер", "Прочее"];
+const MONTHS = ["Янв","Фев","Мар","Апр","Май","Июн","Июл","Авг","Сен","Окт","Ноя","Дек"];
+const ICONS = { "Продакшн":"🎬", "Киберспорт":"🎮", "Нал":"💵" };
+
+const C = {
+  bg:"#0f0f1e", card:"#1a1a30", card2:"#222238",
+  border:"#2e2e4a", accent:"#7c3aed", al:"#a78bfa",
+  green:"#22c55e", red:"#ef4444", amber:"#f59e0b", blue:"#3b82f6",
+  text:"#e2e2f0", sub:"#7878a0", muted:"#3a3a5a", white:"#ffffff"
+};
+
+const fmt = n => new Intl.NumberFormat("ru-RU").format(Math.round(n||0)) + " р.";
+
+function mKey(d) {
+  const dt = new Date(d);
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}`;
+}
+function mLabel(k) {
+  const [y,m] = k.split("-");
+  return `${MONTHS[parseInt(m)-1]} ${y}`;
+}
+
+// UI
+const Card = ({children,style={}}) => <div style={{background:C.card,borderRadius:18,padding:16,...style}}>{children}</div>;
+const Lbl = ({children}) => <div style={{fontSize:11,color:C.sub,letterSpacing:1.5,textTransform:"uppercase",marginBottom:10}}>{children}</div>;
+
+const ChoiceBtn = ({label,icon,active,onClick,color}) => (
+  <button onClick={onClick} style={{
+    flex:1,padding:"16px 10px",borderRadius:14,
+    border:`2px solid ${active?color:C.border}`,
+    background:active?color+"20":C.card2,
+    color:active?color:C.sub,cursor:"pointer",
+    fontSize:13,fontFamily:"'Unbounded',sans-serif",fontWeight:active?700:400,
+    display:"flex",flexDirection:"column",alignItems:"center",gap:8,
+    transition:"all .2s",transform:active?"scale(1.04)":"scale(1)",
+  }}>
+    <span style={{fontSize:26}}>{icon}</span>{label}
+  </button>
+);
+
+const PillBtn = ({label,active,onClick,color=C.accent}) => (
+  <button onClick={onClick} style={{
+    padding:"9px 16px",borderRadius:50,
+    border:`1.5px solid ${active?color:C.border}`,
+    background:active?color:"transparent",
+    color:active?C.white:C.sub,cursor:"pointer",
+    fontSize:13,fontWeight:active?600:400,
+    transition:"all .15s",whiteSpace:"nowrap",
+  }}>{label}</button>
+);
+
+const Dots = ({total,cur}) => (
+  <div style={{display:"flex",gap:6,justifyContent:"center",margin:"8px 0 18px"}}>
+    {Array.from({length:total}).map((_,i)=>(
+      <div key={i} style={{
+        width:i===cur?22:7,height:7,borderRadius:4,
+        background:i<cur?C.al:i===cur?C.accent:C.muted,
+        transition:"all .3s"
+      }}/>
+    ))}
+  </div>
+);
+
+const NumInput = ({value,onChange,placeholder="0",autoFocus=false}) => (
+  <div style={{position:"relative"}}>
+    <input type="number" placeholder={placeholder} value={value} onChange={onChange} autoFocus={autoFocus} style={{
+      width:"100%",boxSizing:"border-box",padding:"16px 52px 16px 16px",
+      background:C.card2,border:`2px solid ${C.border}`,
+      borderRadius:14,color:C.white,fontSize:30,
+      fontFamily:"'Unbounded',sans-serif",outline:"none",
+    }}/>
+    <span style={{position:"absolute",right:16,top:"50%",transform:"translateY(-50%)",color:C.sub,fontSize:16}}>р.</span>
+  </div>
+);
+
+const TxtInput = ({value,onChange,placeholder}) => (
+  <input type="text" placeholder={placeholder} value={value} onChange={onChange} style={{
+    width:"100%",boxSizing:"border-box",padding:"12px 14px",
+    background:C.card2,border:`2px solid ${C.border}`,
+    borderRadius:12,color:C.white,fontSize:14,outline:"none",
+  }}/>
+);
+
+// EntryForm
+function EntryForm({onSave}) {
+  const [step,setStep] = useState(0);
+  const [type,setType] = useState(null);
+  const [acc,setAcc] = useState(null);
+  const [pay,setPay] = useState(null);
+  const [cat,setCat] = useState(null);
+  const [amt,setAmt] = useState("");
+  const [cmt,setCmt] = useState("");
+  const [done,setDone] = useState(false);
+
+  const cats = type==="income"?INCOME_CATS:EXPENSE_CATS;
+  const ok = [!!type,!!acc,!!pay,!!cat,!!amt&&!isNaN(+amt)&&+amt>0];
+
+  function reset(){setStep(0);setType(null);setAcc(null);setPay(null);setCat(null);setAmt("");setCmt("");}
+
+  function submit(){
+    if(!ok[4])return;
+    onSave({id:Date.now(),date:new Date().toISOString(),type,account:acc,payType:pay,category:cat,amount:+amt,comment:cmt});
+    setDone(true);
+    setTimeout(()=>{setDone(false);reset();},1500);
+  }
+
+  if(done) return (
+    <div style={{textAlign:"center",padding:"72px 0"}}>
+      <div style={{fontSize:62,marginBottom:14}}>✅</div>
+      <div style={{color:C.al,fontFamily:"'Unbounded',sans-serif",fontSize:17}}>Сохранено!</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <Dots total={5} cur={step}/>
+      {step===0&&<><Lbl>Тип операции</Lbl><div style={{display:"flex",gap:12}}>
+        <ChoiceBtn label="Доход" icon="📈" active={type==="income"} color={C.green} onClick={()=>setType("income")}/>
+        <ChoiceBtn label="Расход" icon="📉" active={type==="expense"} color={C.red} onClick={()=>setType("expense")}/>
+      </div></>}
+      {step===1&&<><Lbl>Счёт</Lbl><div style={{display:"flex",gap:10}}>
+        {ACCOUNTS.map(a=><ChoiceBtn key={a} label={a} icon={ICONS[a]} active={acc===a} color={C.accent} onClick={()=>setAcc(a)}/>)}
+      </div></>}
+      {step===2&&<><Lbl>Форма оплаты</Lbl><div style={{display:"flex",gap:12}}>
+        <ChoiceBtn label="Нал" icon="💵" active={pay==="cash"} color={C.amber} onClick={()=>setPay("cash")}/>
+        <ChoiceBtn label="Безнал" icon="💳" active={pay==="card"} color={C.blue} onClick={()=>setPay("card")}/>
+      </div></>}
+      {step===3&&<><Lbl>Категория</Lbl><div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+        {cats.map(c=><PillBtn key={c} label={c} active={cat===c} onClick={()=>setCat(c)}/>)}
+      </div></>}
+      {step===4&&<>
+        <Lbl>Сумма</Lbl>
+        <NumInput value={amt} onChange={e=>setAmt(e.target.value)} autoFocus={true}/>
+        <div style={{marginTop:14,marginBottom:6}}><Lbl>Комментарий (необязательно)</Lbl></div>
+        <TxtInput value={cmt} onChange={e=>setCmt(e.target.value)} placeholder="Клиент, описание..."/>
+        <Card style={{marginTop:16,background:C.card2,fontSize:13,color:C.sub,lineHeight:2}}>
+          <span style={{color:type==="income"?C.green:C.red,fontWeight:700}}>{type==="income"?"▲ Доход":"▼ Расход"}</span>
+          {"  ·  "}{acc}{"  ·  "}{pay==="cash"?"💵 Нал":"💳 Безнал"}{"  ·  "}{cat}
+        </Card>
+      </>}
+      <div style={{display:"flex",gap:10,marginTop:22}}>
+        {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{padding:"13px 18px",borderRadius:12,border:"none",background:C.card2,color:C.sub,cursor:"pointer",fontSize:14,fontWeight:600}}>← Назад</button>}
+        {step<4
+          ?<button onClick={()=>ok[step]&&setStep(s=>s+1)} disabled={!ok[step]} style={{flex:1,padding:"13px",borderRadius:12,border:"none",background:ok[step]?C.accent:C.muted,color:C.white,cursor:ok[step]?"pointer":"default",opacity:ok[step]?1:0.45,fontSize:15,fontWeight:700,transition:"all .2s"}}>Далее →</button>
+          :<button onClick={submit} disabled={!ok[4]} style={{flex:1,padding:"13px",borderRadius:12,border:"none",background:ok[4]?C.green:C.muted,color:C.white,cursor:ok[4]?"pointer":"default",opacity:ok[4]?1:0.45,fontSize:15,fontWeight:700}}>💾 Сохранить</button>
+        }
+      </div>
+    </div>
+  );
+}
+
+// History
+function History({entries,onDelete}) {
+  const sorted = [...entries].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const byM = {};
+  for(const e of sorted){const k=mKey(e.date);if(!byM[k])byM[k]=[];byM[k].push(e);}
+
+  if(!entries.length) return (
+    <div style={{textAlign:"center",padding:"60px 0"}}>
+      <div style={{fontSize:48,marginBottom:10}}>📭</div>
+      <div style={{color:C.sub}}>Нет операций</div>
+    </div>
+  );
+
+  return <div>
+    {Object.keys(byM).sort((a,b)=>b.localeCompare(a)).map(month=>{
+      const items=byM[month];
+      const inc=items.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0);
+      const exp=items.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
+      return <div key={month} style={{marginBottom:22}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <span style={{fontFamily:"'Unbounded',sans-serif",fontSize:12,color:C.al}}>{mLabel(month)}</span>
+          <span style={{fontSize:12}}>
+            <span style={{color:C.green}}>+{fmt(inc)}</span>
+            <span style={{color:C.muted,margin:"0 5px"}}>·</span>
+            <span style={{color:C.red}}>−{fmt(exp)}</span>
+          </span>
+        </div>
+        {items.map(e=>(
+          <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 13px",marginBottom:5,background:C.card,borderRadius:12,borderLeft:`3px solid ${e.type==="income"?C.green:C.red}`}}>
+            <span style={{fontSize:18}}>{e.payType==="cash"?"💵":"💳"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,color:C.text,fontWeight:600}}>
+                {e.category} <span style={{color:C.muted,fontWeight:400}}>· {e.account}</span>
+              </div>
+              {e.comment&&<div style={{fontSize:11,color:C.muted,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.comment}</div>}
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:12,color:e.type==="income"?C.green:C.red,fontWeight:700}}>
+                {e.type==="income"?"+":"−"}{fmt(e.amount)}
+              </div>
+              <div style={{fontSize:10,color:C.muted,marginTop:2}}>{new Date(e.date).toLocaleDateString("ru-RU")}</div>
+            </div>
+            <button onClick={()=>onDelete(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:15}}>✕</button>
+          </div>
+        ))}
+      </div>;
+    })}
+  </div>;
+}
+
+// BalanceCorrection
+function BalanceCorrection({overrides,onSave}) {
+  const [vals,setVals] = useState(()=>{
+    const i={};ACCOUNTS.forEach(a=>{i[a]=overrides[a]!==undefined?String(overrides[a]):"";});return i;
+  });
+  const [saved,setSaved] = useState(false);
+
+  function submit(){
+    const r={};ACCOUNTS.forEach(a=>{if(vals[a]!==""&&!isNaN(+vals[a]))r[a]=+vals[a];});
+    onSave(r);setSaved(true);setTimeout(()=>setSaved(false),2000);
+  }
+
+  return <div>
+    <Card style={{marginBottom:16,background:C.card2}}>
+      <div style={{fontSize:13,color:C.sub,lineHeight:1.7}}>
+        Введите фактический остаток на каждом счёте. История операций останется без изменений.
+      </div>
+    </Card>
+    {ACCOUNTS.map(a=>(
+      <div key={a} style={{marginBottom:18}}>
+        <Lbl>{ICONS[a]}  {a}</Lbl>
+        <NumInput value={vals[a]} onChange={e=>setVals(v=>({...v,[a]:e.target.value}))} placeholder="Текущий остаток"/>
+      </div>
+    ))}
+    <button onClick={submit} style={{width:"100%",padding:"14px",borderRadius:14,border:"none",background:saved?C.green:C.accent,color:C.white,cursor:"pointer",fontSize:15,fontWeight:700,transition:"all .3s"}}>
+      {saved?"✅ Сохранено!":"💾 Применить корректировку"}
+    </button>
+    {Object.keys(overrides).length>0&&<div style={{marginTop:22}}>
+      <Lbl>Активные корректировки</Lbl>
+      {ACCOUNTS.filter(a=>overrides[a]!==undefined).map(a=>(
+        <div key={a} style={{display:"flex",justifyContent:"space-between",padding:"11px 0",borderBottom:`1px solid ${C.border}`,fontSize:13}}>
+          <span style={{color:C.sub}}>{ICONS[a]}  {a}</span>
+          <span style={{color:C.al,fontWeight:600}}>{fmt(overrides[a])}</span>
+        </div>
+      ))}
+      <button onClick={()=>onSave({})} style={{marginTop:14,padding:"10px 16px",borderRadius:10,border:`1px solid ${C.border}`,background:"transparent",color:C.red,cursor:"pointer",fontSize:12}}>
+        Сбросить корректировки
+      </button>
+    </div>}
+  </div>;
+}
+
+// Export
+function doExport(entries, overrides) {
+  const byM={};
+  for(const e of entries){const k=mKey(e.date);if(!byM[k])byM[k]={inc:0,exp:0};if(e.type==="income")byM[k].inc+=e.amount;else byM[k].exp+=e.amount;}
+  const rows=["ДИНАМИКА ПО МЕСЯЦАМ",["Месяц","Доходы","Расходы","Прибыль","Маржа %"].join(";")];
+  let tI=0,tE=0;
+  for(const m of Object.keys(byM).sort()){const{inc,exp}=byM[m];tI+=inc;tE+=exp;rows.push([mLabel(m),inc,exp,inc-exp,inc>0?((inc-exp)/inc*100).toFixed(1)+"%":"0%"].join(";"));}
+  rows.push(["ИТОГО",tI,tE,tI-tE,tI>0?((tI-tE)/tI*100).toFixed(1)+"%":"0%"].join(";"));
+  rows.push("","БАЛАНСЫ ПО СЧЕТАМ",["Счёт","Остаток","Доходы","Расходы"].join(";"));
+  for(const a of ACCOUNTS){const inc=entries.filter(e=>e.account===a&&e.type==="income").reduce((s,e)=>s+e.amount,0);const exp=entries.filter(e=>e.account===a&&e.type==="expense").reduce((s,e)=>s+e.amount,0);rows.push([a,overrides[a]!==undefined?overrides[a]:(inc-exp),inc,exp].join(";"));}
+  rows.push("","ВСЕ ОПЕРАЦИИ",["Дата","Тип","Счёт","Нал/Безнал","Категория","Сумма","Комментарий"].join(";"));
+  for(const e of [...entries].sort((a,b)=>new Date(b.date)-new Date(a.date))){rows.push([new Date(e.date).toLocaleDateString("ru-RU"),e.type==="income"?"Доход":"Расход",e.account,e.payType==="cash"?"Нал":"Безнал",e.category,e.amount,e.comment||""].join(";"));}
+  const blob=new Blob(["\uFEFF"+rows.join("\n")],{type:"text/csv;charset=utf-8;"});
+  const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`airtime_${new Date().toLocaleDateString("ru-RU").replace(/\./g,"-")}.csv`;a.click();URL.revokeObjectURL(url);
+}
+
+// Dashboard
+function Dashboard({entries,overrides,onExport,sync}) {
+  const tI=entries.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0);
+  const tE=entries.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
+  const byM={};
+  for(const e of entries){const k=mKey(e.date);if(!byM[k])byM[k]={inc:0,exp:0};if(e.type==="income")byM[k].inc+=e.amount;else byM[k].exp+=e.amount;}
+  const months=Object.keys(byM).sort().slice(-6);
+  const maxV=Math.max(...months.map(m=>Math.max(byM[m].inc,byM[m].exp)),1);
+
+  return <div>
+    <div style={{textAlign:"center",marginBottom:10}}>
+      <span style={{fontSize:11,color:sync==="cloud"?C.green:C.amber}}>
+        {sync==="cloud"?"☁️ Облако (Firebase) — синхронизация активна":"💾 Локально — данные на этом устройстве"}
+      </span>
+    </div>
+
+    <div style={{textAlign:"center",padding:"6px 0 18px"}}>
+      <div style={{fontSize:11,color:C.sub,letterSpacing:2,textTransform:"uppercase",marginBottom:4}}>Общий баланс</div>
+      <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:34,color:tI-tE>=0?C.green:C.red,fontWeight:700}}>
+        {tI-tE>=0?"+":""}{fmt(tI-tE)}
+      </div>
+      <div style={{display:"flex",justifyContent:"center",gap:18,marginTop:8,fontSize:13}}>
+        <span style={{color:C.green}}>↑ {fmt(tI)}</span>
+        <span style={{color:C.red}}>↓ {fmt(tE)}</span>
+      </div>
+    </div>
+
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      {ACCOUNTS.map(a=>{
+        const inc=entries.filter(e=>e.account===a&&e.type==="income").reduce((s,e)=>s+e.amount,0);
+        const exp=entries.filter(e=>e.account===a&&e.type==="expense").reduce((s,e)=>s+e.amount,0);
+        const ov=overrides[a];const d=ov!==undefined?ov:(inc-exp);
+        return <Card key={a} style={{flex:1,background:C.card2,padding:"12px 10px",textAlign:"center"}}>
+          <div style={{fontSize:18,marginBottom:4}}>{ICONS[a]}</div>
+          <div style={{fontSize:10,color:C.sub,marginBottom:4}}>{a}</div>
+          <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:12,color:d>=0?C.al:C.red,fontWeight:700,lineHeight:1.3}}>{fmt(d)}</div>
+          {ov!==undefined&&<div style={{fontSize:9,color:C.amber,marginTop:3}}>✱ скорр.</div>}
+        </Card>;
+      })}
+    </div>
+
+    {months.length>0&&<Card style={{marginBottom:14}}>
+      <div style={{fontSize:11,color:C.sub,letterSpacing:1,textTransform:"uppercase",marginBottom:14}}>Динамика</div>
+      <div style={{display:"flex",alignItems:"flex-end",gap:6,height:90}}>
+        {months.map(m=>{
+          const{inc,exp}=byM[m];
+          return <div key={m} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center"}}>
+            <div style={{display:"flex",gap:3,alignItems:"flex-end",height:82}}>
+              <div style={{width:10,height:Math.max(Math.round((inc/maxV)*80),2),background:C.green,borderRadius:"3px 3px 0 0",opacity:.85}}/>
+              <div style={{width:10,height:Math.max(Math.round((exp/maxV)*80),2),background:C.red,borderRadius:"3px 3px 0 0",opacity:.85}}/>
+            </div>
+            <div style={{fontSize:9,color:C.sub,marginTop:4}}>{mLabel(m).slice(0,3)}</div>
+          </div>;
+        })}
+      </div>
+      <div style={{display:"flex",gap:14,marginTop:8,fontSize:11,color:C.sub}}>
+        <span><span style={{color:C.green}}>■</span> Доход</span>
+        <span><span style={{color:C.red}}>■</span> Расход</span>
+      </div>
+    </Card>}
+
+    {Object.keys(byM).length>0&&<Card style={{marginBottom:14}}>
+      <div style={{fontSize:11,color:C.sub,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>По месяцам</div>
+      {Object.keys(byM).sort((a,b)=>b.localeCompare(a)).map(m=>{
+        const{inc,exp}=byM[m];const p=inc-exp;
+        return <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${C.border}`}}>
+          <span style={{fontSize:13,color:C.text}}>{mLabel(m)}</span>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,color:p>=0?C.green:C.red,fontWeight:700}}>{p>=0?"+":""}{fmt(p)}</div>
+            <div style={{fontSize:10,color:C.sub}}>↑{fmt(inc)} ↓{fmt(exp)}</div>
+          </div>
+        </div>;
+      })}
+    </Card>}
+
+    <button onClick={onExport} style={{width:"100%",padding:"14px",borderRadius:14,border:`1.5px solid ${C.border}`,background:"transparent",color:C.al,cursor:"pointer",fontSize:14,fontWeight:600,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+      <span>📥</span> Экспорт в Excel (CSV)
+    </button>
+  </div>;
+}
+
+// App
+function App() {
+  const [tab,setTab] = useState("add");
+  const [entries,setEntries] = useState([]);
+  const [overrides,setOverrides] = useState({});
+  const [loading,setLoading] = useState(true);
+  const [sync,setSync] = useState("local");
+
+  useEffect(()=>{
+    async function init(){
+      const ok=await initFirebase();
+      setSync(ok?"cloud":"local");
+      try{const r=await load("entries");if(r)setEntries(JSON.parse(r));}catch(_){}
+      try{const r=await load("balances");if(r)setOverrides(JSON.parse(r));}catch(_){}
+      setLoading(false);
+    }
+    init();
+  },[]);
+
+  async function saveEntries(next){setEntries(next);await save("entries",JSON.stringify(next));}
+  async function saveOverrides(next){setOverrides(next);await save("balances",JSON.stringify(next));}
+
+  const tabs=[
+    {id:"add",icon:"＋",label:"Внести"},
+    {id:"history",icon:"☰",label:"История"},
+    {id:"balances",icon:"⚖",label:"Баланс"},
+    {id:"dashboard",icon:"◈",label:"Итоги"},
+  ];
+
+  return <>
+    <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"18px 18px 12px",background:"linear-gradient(180deg,#16163a 0%,#0f0f1e 100%)",borderBottom:`1px solid ${C.border}`}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{fontFamily:"'Unbounded',sans-serif",fontSize:17,color:C.text,fontWeight:700,letterSpacing:-0.5}}>Air Time</div>
+            <div style={{fontSize:10,color:C.muted,letterSpacing:1.5,textTransform:"uppercase"}}>финансовый трекер</div>
+          </div>
+          <div style={{width:38,height:38,borderRadius:11,background:"#7c3aed25",border:"1px solid #7c3aed44",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎬</div>
+        </div>
+      </div>
+
+      <div style={{flex:1,padding:"18px 16px 84px",overflowY:"auto"}}>
+        {loading
+          ?<div style={{textAlign:"center",padding:"80px 0",color:C.sub}}>Загрузка...</div>
+          :<>
+            {tab==="add"&&<EntryForm onSave={e=>saveEntries([...entries,e])}/>}
+            {tab==="history"&&<History entries={entries} onDelete={id=>saveEntries(entries.filter(e=>e.id!==id))}/>}
+            {tab==="balances"&&<BalanceCorrection overrides={overrides} onSave={saveOverrides}/>}
+            {tab==="dashboard"&&<Dashboard entries={entries} overrides={overrides} onExport={()=>doExport(entries,overrides)} sync={sync}/>}
+          </>
+        }
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"#14143a",borderTop:`1px solid ${C.border}`,display:"flex",padding:"8px 0 14px"}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"5px 0"}}>
+            <span style={{fontSize:19,filter:tab===t.id?"none":"grayscale(1)",opacity:tab===t.id?1:0.35,transition:"all .2s"}}>{t.icon}</span>
+            <span style={{fontSize:10,color:tab===t.id?C.al:C.muted,fontWeight:tab===t.id?600:400}}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  </>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+  </script>
+</body>
+</html>
